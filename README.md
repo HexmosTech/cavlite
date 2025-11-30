@@ -1,11 +1,10 @@
 # `cavlite`: **Lightweight, Memory-Efficient Security Audit for Low-RAM Servers.**
 
-
-`cavlite` is a wrapper around **ClamAV** and **Lynis** designed specifically for servers with limited resources (e.g., 4GB RAM or less). It orchestrates the scanning process to ensure maximum memory efficiency without sacrificing security.
+`cavlite` is a wrapper around **[ClamAV](https://www.clamav.net/)** and **[Lynis](https://cisofy.com/lynis/)** designed specifically for servers with limited resources (e.g., 4GB RAM or less). It orchestrates the scanning process to ensure maximum memory efficiency without sacrificing security.
 
 ## Problem: Why `clamscan` Is a Problem on Low-RAM Servers
 
-The standard `clamscan` utility is resource-intensive. Every time it runs, it loads the entire virus database (600MB–900MB+) into RAM, performs the scan, and then unloads it. On a server with limited memory, this sudden spike can cause:
+The standard [`clamscan`](https://docs.clamav.net/manual/Usage/Scanning.html#clamscan) utility is resource-intensive. Every time it runs, it loads the entire virus database (600MB–900MB+) into RAM, performs the scan, and then unloads it. On a server with limited memory, this sudden spike can cause:
 
 * System slowdowns.
 * OOM (Out of Memory) kills.
@@ -16,7 +15,7 @@ The standard `clamscan` utility is resource-intensive. Every time it runs, it lo
 `cavlite` solves this by using `clamd` (the ClamAV daemon) intelligently. Instead of letting `clamscan` load the DB repeatedly or keeping `clamd` running 24/7 (wasting RAM when not scanning), `cavlite`:
 
 1. **Starts** the daemon only when a scan is requested.
-2. **Uses** the daemon to scan efficiently.
+2. **Uses** the daemon (via [`clamdscan`](https://docs.clamav.net/manual/Usage/Scanning.html#clamdscan)) to scan efficiently.
 3. **Stops** the daemon immediately after the scan to free up resources.
 
 This approach gives you the speed of the daemon without the permanent memory footprint.
@@ -30,7 +29,7 @@ Here is how `cavlite` performs a security audit:
 3. **Security Scan**:
     * Runs **ClamAV** using the daemon to scan files.
     * Moves infected files to the quarantine directory (`/var/quarantine` by default).
-    * Runs **Lynis** for a system-wide security audit.
+    * Runs **[Lynis](https://cisofy.com/lynis/)** for a system-wide security audit.
 4. **Cleanup**: Stops `clamav-daemon` to release RAM back to the system.
 5. **Reporting**: Generates a summary log and sends a notification (if configured).
 
@@ -86,5 +85,3 @@ SCAN_PATH="/"
 # Directory to move infected files
 QUARANTINE_DIR="/var/quarantine"
 ```
-
-
