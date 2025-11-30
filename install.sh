@@ -22,7 +22,14 @@ LIB_DIR="/usr/local/lib/cavlite"
 CONFIG_DIR="/etc/cavlite"
 CONFIG_FILE="$CONFIG_DIR/cavlite.conf"
 CLAMAV_CONFIG_DIR="/etc/clamav"
-BACKUP_DIR="$HOME/.cavlite/backup/clamav"
+
+# Determine backup directory
+if [ -n "$SUDO_USER" ]; then
+    USER_HOME=$(getent passwd "$SUDO_USER" | cut -d: -f6)
+    BACKUP_DIR="$USER_HOME/.cavlite/backup/clamav"
+else
+    BACKUP_DIR="$HOME/.cavlite/backup/clamav"
+fi
 
 check_root() {
     if [ "$EUID" -ne 0 ]; then
