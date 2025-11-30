@@ -1,6 +1,6 @@
-# `cavlite`: **Lightweight, Memory-Efficient Security Audit for Low-RAM Servers.**
+# `CAVLite`: **Lightweight, Memory-Efficient Security Audit for Low-RAM Servers.**
 
-`cavlite` is a wrapper around **[ClamAV](https://www.clamav.net/)** and **[Lynis](https://cisofy.com/lynis/)** designed specifically for servers with limited resources (e.g., 4GB RAM or less). It orchestrates the scanning process to ensure maximum memory efficiency without sacrificing security.
+`CAVLite` is a wrapper around **[ClamAV](https://www.clamav.net/)** and **[Lynis](https://cisofy.com/lynis/)** designed specifically for servers with limited resources (e.g., 4GB RAM or less). It orchestrates the scanning process to ensure maximum memory efficiency without sacrificing security.
 
 ## Problem: Why `clamscan` Is a Problem on Low-RAM Servers
 
@@ -12,7 +12,7 @@ The standard [`clamscan`](https://docs.clamav.net/manual/Usage/Scanning.html#cla
 
 ## Solution: `clamd` on Demand
 
-`cavlite` solves this by using `clamd` (the ClamAV daemon) intelligently. Instead of letting `clamscan` load the DB repeatedly or keeping `clamd` running 24/7 (wasting RAM when not scanning), `cavlite`:
+`CAVLite` solves this by using `clamd` (the ClamAV daemon) intelligently. Instead of letting `clamscan` load the DB repeatedly or keeping `clamd` running 24/7 (wasting RAM when not scanning), `CAVLite`:
 
 1. **Starts** the daemon only when a scan is requested.
 2. **Uses** the daemon (via [`clamdscan`](https://docs.clamav.net/manual/Usage/Scanning.html#clamdscan)) to scan efficiently.
@@ -22,12 +22,12 @@ This approach gives you the speed of the daemon without the permanent memory foo
 
 ## Core Logic
 
-Here is how `cavlite` performs a security audit:
+`CAVLite` performs a security audit by :
 
 1. **Checks**: Verifies root privileges and ensures no other scan is running.
 2. **Daemon Startup**: Starts `clamav-daemon` and waits for it to load the virus definitions.
 3. **Security Scan**:
-    * Runs **ClamAV** using the daemon to scan files.
+    * Runs **[ClamAV](https://www.clamav.net/)** using the daemon to scan files.
     * Moves infected files to the quarantine directory (`/var/quarantine` by default).
     * Runs **[Lynis](https://cisofy.com/lynis/)** for a system-wide security audit.
 4. **Cleanup**: Stops `clamav-daemon` to release RAM back to the system.
@@ -35,31 +35,31 @@ Here is how `cavlite` performs a security audit:
 
 ## Installation
 
-You can install `cavlite` with a single command:
+You can install `CAVLite` with a single command:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/HexmosTech/cavlite/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/HexmosTech/CAVLite/main/install.sh | sudo bash
 ```
 
 To install a specific version (e.g., `v0.0.2`), run:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/HexmosTech/cavlite/main/install.sh | sudo bash -s -- --v0.0.2
+curl -fsSL https://raw.githubusercontent.com/HexmosTech/CAVLite/main/install.sh | sudo bash -s -- --v0.0.2
 ```
 
 This script will:
 
 * Check for dependencies (`python3`, `curl`, `clamav`, `lynis`).
-* Install `cavlite` to `/usr/local/bin/cavlite`.
+* Install `CAVLite` to `/usr/local/bin/CAVLite`.
 * Install helper scripts and configurations.
 * Configure ClamAV with optimized settings.
 
 ## Usage
 
-Run `cavlite` as root:
+Run `CAVLite` as root:
 
 ```bash
-sudo cavlite [COMMAND]
+sudo CAVLite [COMMAND]
 ```
 
 | Command | Description |
@@ -71,10 +71,10 @@ sudo cavlite [COMMAND]
 
 ## Configuration
 
-Configuration is loaded from `/etc/cavlite/cavlite.conf`.
+Configuration is loaded from `/etc/CAVLite/CAVLite.conf`.
 
 ```bash
-# /etc/cavlite/cavlite.conf
+# /etc/CAVLite/CAVLite.conf
 
 # Discord Webhook URL for notifications
 WEBHOOK_URL="https://discord.com/api/webhooks/..."
@@ -85,6 +85,9 @@ SCAN_PATH="/"
 # Directory to move infected files
 QUARANTINE_DIR="/var/quarantine"
 ```
+
+## Credits
+
 
 ## License
 
