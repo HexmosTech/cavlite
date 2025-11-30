@@ -83,12 +83,16 @@ setup_config() {
 
     # Setup ClamAV configs
     echo "⚙️  Configuring ClamAV..."
-    mkdir -p "$BACKUP_DIR"
+    
+    # Create timestamped backup directory
+    TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+    BACKUP_PATH="$BACKUP_DIR/$TIMESTAMP"
+    mkdir -p "$BACKUP_PATH"
     
     # Backup and replace clamd.conf
     if [ -f "$CLAMAV_CONFIG_DIR/clamd.conf" ]; then
-        echo "📦 Backing up clamd.conf to $BACKUP_DIR"
-        cp "$CLAMAV_CONFIG_DIR/clamd.conf" "$BACKUP_DIR/clamd.conf.$(date +%F_%T)"
+        echo "📦 Backing up clamd.conf to $BACKUP_PATH/"
+        cp "$CLAMAV_CONFIG_DIR/clamd.conf" "$BACKUP_PATH/clamd.conf"
     fi
     if ! curl -fsSL "$REPO_URL/clamd.conf" -o "$CLAMAV_CONFIG_DIR/clamd.conf"; then
          echo "⚠️  Warning: Failed to download clamd.conf."
@@ -96,8 +100,8 @@ setup_config() {
 
     # Backup and replace freshclam.conf
     if [ -f "$CLAMAV_CONFIG_DIR/freshclam.conf" ]; then
-        echo "📦 Backing up freshclam.conf to $BACKUP_DIR"
-        cp "$CLAMAV_CONFIG_DIR/freshclam.conf" "$BACKUP_DIR/freshclam.conf.$(date +%F_%T)"
+        echo "📦 Backing up freshclam.conf to $BACKUP_PATH/"
+        cp "$CLAMAV_CONFIG_DIR/freshclam.conf" "$BACKUP_PATH/freshclam.conf"
     fi
     if ! curl -fsSL "$REPO_URL/freshclam.conf" -o "$CLAMAV_CONFIG_DIR/freshclam.conf"; then
          echo "⚠️  Warning: Failed to download freshclam.conf."
