@@ -3,7 +3,7 @@
 
 `cavlite` is a wrapper around **ClamAV** and **Lynis** designed specifically for servers with limited resources (e.g., 4GB RAM or less). It orchestrates the scanning process to ensure maximum memory efficiency without sacrificing security.
 
-## Problem: Why `[clamscan](https://docs.clamav.net/manual/Usage/Scanning.html#clamscan)` Is a Problem on Low-RAM Servers
+## Problem: Why `clamscan` Is a Problem on Low-RAM Servers
 
 The standard `clamscan` utility is resource-intensive. Every time it runs, it loads the entire virus database (600MB–900MB+) into RAM, performs the scan, and then unloads it. On a server with limited memory, this sudden spike can cause:
 
@@ -11,7 +11,7 @@ The standard `clamscan` utility is resource-intensive. Every time it runs, it lo
 * OOM (Out of Memory) kills.
 * Service interruptions.
 
-## Solution: `[clamd](https://docs.clamav.net/manual/Usage/Scanning.html#clamd)` on Demand
+## Solution: `clamd` on Demand
 
 `cavlite` solves this by using `clamd` (the ClamAV daemon) intelligently. Instead of letting `clamscan` load the DB repeatedly or keeping `clamd` running 24/7 (wasting RAM when not scanning), `cavlite`:
 
