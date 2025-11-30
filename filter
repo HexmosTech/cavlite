@@ -1,0 +1,150 @@
+#!/usr/bin/env python3
+"""
+Security Audit Log Cleaner - Simplified Version
+
+This script extracts only the essential information from security audit logs:
+- ClamAV scan results (malware detection)
+- Simple binary result: has_malware = true/false
+"""
+
+import re
+import os
+import sys
+from datetime import datetime
+
+
+def extract_clamav_summary(content):
+    """
+    Extract ClamAV scan summary from the content.
+
+    Args:
+        content (str): Audit log content
+
+    Returns:
+        dict: Dictionary with ClamAV results
+    """
+    # Look for ClamAV scan summary
+    clamav_pattern = r"----------- SCAN SUMMARY -----------\n(.*?)(?=\n\n|\n\[|\n🔐|$)"
+    clamav_match = re.search(clamav_pattern, content, re.DOTALL)
+
+    # Extract hostname
+    hostname = "Unknown"
+    hostname_match = re.search(r"Running ClamAV scan on ([^\s]+)", content)
+    if hostname_match:
+        hostname = hostname_match.group(1)
+
+    if clamav_match:
+        summary_text = clamav_match.group(1).strip()
+
+        # Extract key values
+        infected_files = 0
+        total_files = 0
+
+        # Parse infected files
+        infected_match = re.search(r"Infected files:\s*(\d+)", summary_text)
+        if infected_match:
+            infected_files = int(infected_match.group(1))
+
+        # Parse total files
+        files_match = re.search(r"Scanned files:\s*(\d+)", summary_text)
+        if files_match:
+            total_files = int(files_match.group(1))
+
+        return {
+            "hostname": hostname,
+            "summary": summary_text,
+            "infected_files": infected_files,
+            "total_files": total_files,
+            "has_malware": infected_files > 0,
+        }
+    else:
+        return {
+            "hostname": hostname,
+            "summary": "No ClamAV scan summary found. The scan may have been interrupted or failed to complete.",
+            "infected_files": 0,
+            "total_files": 0,
+            "has_malware": False,
+        }
+
+
+def create_simple_report(input_file):
+    """
+    Create a simple, focused security report.
+
+    Args:
+        input_file (str): Path to the input log file
+
+    Returns:
+        str: Path to the created report file
+    """
+    try:
+        # Read the input file
+        with open(input_file, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        # Extract ClamAV results
+        clamav_results = extract_clamav_summary(content)
+
+        # Generate report filename
+        base_name = os.path.splitext(input_file)[0]
+        report_file = f"{base_name}_simple_report.txt"
+
+        # Get absolute path
+        report_file = os.path.abspath(report_file)
+
+        # Create simple report content
+        report_content = f"""🔐 SECURITY AUDIT - SIMPLE REPORT ON {clamav_results['hostname']}
+Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+MALWARE DETECTION:
+=================
+Infected: {'YES' if clamav_results['has_malware'] else 'NO'}
+Files scanned: {clamav_results['total_files']:,}
+Infected files: {clamav_results['infected_files']}
+
+CLAMAV SCAN DETAILS:
+===================
+{clamav_results['summary']}
+
+---
+Report generated from: {input_file}
+"""
+
+        # Write report file
+        with open(report_file, "w", encoding="utf-8") as f:
+            f.write(report_content)
+
+        return report_file
+
+    except Exception as e:
+        return None
+
+
+def main():
+    """
+    Main function to run the simplified security audit processor.
+    """
+    # Check command line arguments
+    if len(sys.argv) != 2:
+        print("Usage: python3 clean.py <log_file>")
+        sys.exit(1)
+
+    # Input file from command line argument
+    input_file = sys.argv[1]
+
+    # Check if input file exists
+    if not os.path.exists(input_file):
+        sys.exit(1)
+
+    # Create simple report
+    report_file = create_simple_report(input_file)
+
+    if report_file:
+        # Print only the filename to stdout
+        print(report_file)
+    else:
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

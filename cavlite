@@ -1,0 +1,225 @@
+#!/bin/bash
+
+VERSION="0.0.1"
+
+# Setup
+# --- CONFIGURATION START ---
+# Default values
+WEBHOOK_URL=""
+SERVER_NAME=$(hostname -s)
+
+# Load external configuration
+if [ -f "/etc/cavlite/cavlite.conf" ]; then
+    source "/etc/cavlite/cavlite.conf"
+fi
+
+# Paths
+LOG_DIR="/var/log"
+LOG_FILE="$LOG_DIR/security_audit.log"
+PID_FILE="/var/run/security_audit.pid"
+QUARANTINE_DIR="/var/quarantine"
+SCAN_PATH="/"
+CLEANER_SCRIPT="/usr/local/lib/cavlite/filter"
+# --- CONFIGURATION END ---
+
+function send_notification() {
+    local content="$1"
+    local file_to_attach="$2"
+
+    read -r -d '' PAYLOAD <<EOF
+{
+  "content": "$(echo -e "$content" | sed ':a;N;$!ba;s/\n/\\n/g' | sed 's/"/\\"/g')"
+}
+EOF
+
+    if [[ -n "$file_to_attach" && -f "$file_to_attach" ]]; then
+        curl -s -X POST "$WEBHOOK_URL" -F "payload_json=$PAYLOAD" -F "file=@$file_to_attach"
+    else
+        curl -s -X POST "$WEBHOOK_URL" -H "Content-Type: application/json" -d "$PAYLOAD"
+    fi
+}
+
+function start_scan() {
+    if [ -f "$PID_FILE" ]; then
+        echo "Scan is already in progress (PID: $(cat $PID_FILE)). Exiting."
+        exit 1
+    fi
+
+    # Create log directory
+    mkdir -p "$LOG_DIR"
+    # Rotate previous log
+    [ -f "$LOG_FILE" ] && mv "$LOG_FILE" "${LOG_FILE}.old"
+
+    echo $$ >"$PID_FILE"
+    trap 'rm -f "$PID_FILE"; sudo systemctl stop clamav-daemon &>/dev/null' EXIT
+
+    # Start logging
+    TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
+    echo "🔐 Security Audit Started - $TIMESTAMP on $SERVER_NAME" | tee "$LOG_FILE"
+
+    echo "Starting clamav-daemon..." | tee -a "$LOG_FILE"
+    sudo systemctl start clamav-daemon
+
+    # Wait for clamav-daemon to start (timeout 30 minutes)
+    for i in {1..180}; do 
+        if systemctl is-active --quiet clamav-daemon; then
+            echo "clamav-daemon started successfully." | tee -a "$LOG_FILE"
+            break
+        fi
+        sleep 10
+    done
+
+    if ! systemctl is-active --quiet clamav-daemon; then
+        echo "Error: clamav-daemon failed to start after 30 minutes." | tee -a "$LOG_FILE"
+        send_notification "🚨 **CRITICAL: ClamAV daemon failed to start on $SERVER_NAME!**\nSecurity scan could not be performed." "$LOG_FILE"
+        exit 1
+    fi
+
+    echo "Running ClamAV scan on $SERVER_NAME..." | tee -a "$LOG_FILE"
+    mkdir -p "$QUARANTINE_DIR"
+    
+    # --- TARGET FOLDER IS SET HERE ---
+    clamscan -r "$SCAN_PATH" --infected --move="$QUARANTINE_DIR" 2>&1 | tee -a "$LOG_FILE"
+    CLAM_EXIT=${PIPESTATUS[0]}
+
+    echo -e "\nRunning Lynis audit..." | tee -a "$LOG_FILE"
+    lynis audit system | tee -a "$LOG_FILE"
+    LYNIS_EXIT=${PIPESTATUS[0]}
+
+    echo -e "\nCleaning up log file..." | tee -a "$LOG_FILE"
+    CLEANED_LOG_FILE=$(python3 "$CLEANER_SCRIPT" "$LOG_FILE")
+
+    if [[ -n "$CLEANED_LOG_FILE" && -f "$CLEANED_LOG_FILE" ]]; then
+        CLEANED_CONTENT=$(cat "$CLEANED_LOG_FILE")
+    else
+        if [[ $CLAM_EXIT -eq 0 && $LYNIS_EXIT -eq 0 ]]; then
+            CLEANED_CONTENT="✅ Security audit completed successfully on $SERVER_NAME."
+        else
+            CLEANED_CONTENT="⚠️ Security audit completed with issues on $SERVER_NAME."
+        fi
+    fi
+
+    # Send the main notification
+    send_notification "$CLEANED_CONTENT" "$LOG_FILE"
+
+    # --- MARKER: THIS PREVENTS DOUBLE NOTIFICATIONS ---
+    echo "### SCAN_FINISHED_NOTIFICATION_SENT ###" >> "$LOG_FILE"
+
+    echo "Stopping clamav-daemon..." | tee -a "$LOG_FILE"
+    sudo systemctl stop clamav-daemon
+}
+
+function stop_scan() {
+    # --- UPDATED LOGIC TO PREVENT DOUBLE NOTIFICATION ---
+    # 1. Check if the SUCCESS notification marker exists
+    # 2. OR Check if we are in the cleaning up phase
+    if [ -f "$LOG_FILE" ]; then
+        if grep -q "### SCAN_FINISHED_NOTIFICATION_SENT ###" "$LOG_FILE"; then
+            echo "Scan finished and notification was already sent. Stopping silently..."
+            SILENT_STOP=true
+        elif grep -q "Cleaning up log file..." "$LOG_FILE"; then
+            # If it's cleaning up but hasn't sent the notification yet, we might want to wait,
+            # but to be safe let's treat it as 'almost done' and kill silently to avoid spam.
+            echo "Scan is in final cleanup phase. Stopping silently..."
+            SILENT_STOP=true
+        else
+            SILENT_STOP=false
+        fi
+    else
+        SILENT_STOP=false
+    fi
+
+    if [ "$SILENT_STOP" = true ]; then
+        sudo pkill -9 clamscan 2>/dev/null
+        sudo pkill -9 lynis 2>/dev/null
+        sudo systemctl stop clamav-daemon 2>/dev/null
+        if [ -f "$PID_FILE" ]; then
+            kill "$(cat "$PID_FILE")" 2>/dev/null
+            rm -f "$PID_FILE"
+        fi
+        exit 0
+    fi
+    # ----------------------------------------
+
+    echo "Stopping security scan..."
+
+    # 1. KILL CLAMSCAN
+    if pgrep "clamscan" > /dev/null; then
+        echo "Found running clamscan process. Killing it..."
+        sudo pkill -9 clamscan
+    fi
+
+    # 2. KILL LYNIS
+    if pgrep "lynis" > /dev/null; then
+        echo "Found running Lynis process. Killing it..."
+        sudo pkill -9 lynis
+    fi
+
+    # 3. Stop the daemon
+    if systemctl is-active --quiet clamav-daemon; then
+        echo "Stopping clamav-daemon..."
+        sudo systemctl stop clamav-daemon
+    fi
+
+    # 4. Kill the script PID
+    if [ -f "$PID_FILE" ]; then
+        SCAN_PID=$(cat "$PID_FILE")
+        if ps -p "$SCAN_PID" >/dev/null; then
+            echo "Terminating script manager (PID: $SCAN_PID)..."
+            kill "$SCAN_PID"
+        fi
+        rm -f "$PID_FILE"
+    fi
+    
+    # 5. Send Interrupted Notification
+    echo "Waiting for logs to finalize..."
+    sleep 3
+
+    if [ -f "$LOG_FILE" ]; then
+        # Double check marker one last time in case it finished inside the 3 second sleep
+        if grep -q "### SCAN_FINISHED_NOTIFICATION_SENT ###" "$LOG_FILE"; then
+            echo "Scan finished during stop process. Skipping interruption alert."
+            exit 0
+        fi
+
+        echo "Processing partial log file..."
+        echo -e "\n\n--- SCAN INTERRUPTED MANUALLY ---" >> "$LOG_FILE"
+
+        CLEANED_LOG_FILE=$(python3 "$CLEANER_SCRIPT" "$LOG_FILE")
+
+        if [[ -n "$CLEANED_LOG_FILE" && -f "$CLEANED_LOG_FILE" ]]; then
+            CLEANED_CONTENT=$(cat "$CLEANED_LOG_FILE")
+            NOTIFICATION_MSG="🟡 **Scan Interrupted on $SERVER_NAME**\nThe security scan did not complete. Here is a summary of the partial results:\n\n$CLEANED_CONTENT"
+            send_notification "$NOTIFICATION_MSG" "$LOG_FILE"
+        else
+            send_notification "🟡 **Scan Interrupted on $SERVER_NAME**\nThe security scan was stopped, but no summary could be generated." "$LOG_FILE"
+        fi
+    else
+        send_notification "🟡 **Scan Interrupted on $SERVER_NAME**\nThe security scan was stopped, but no log file was found to process."
+    fi
+
+    echo "Scan stopped."
+}
+
+function show_help() {
+    echo "Usage: $0 {--start|--stop|--help|-h}"
+    echo "  --start      Start the security scan (ClamAV and Lynis)."
+    echo "  --stop       Stop any running security scan."
+    echo "  --help, -h   Display this help message."
+}
+
+case "$1" in
+--start)
+    start_scan
+    ;;
+--stop)
+    stop_scan
+    ;;
+--help|-h)
+    show_help
+    ;;
+*)
+    show_help
+    exit 1
+    ;;
+esac
