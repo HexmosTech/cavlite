@@ -148,12 +148,26 @@ function start_scan() {
     # Inject configuration
     update_clamd_config
 
+
+
     echo "Running ClamAV scan on $SERVER_NAME..." >> "$LOG_FILE"
+    
+    # Count files to scan (for reporting confidence)
+    echo "🔍 Calculating files to scan..." | tee -a "$LOG_FILE"
+    FIND_OPTS=()
+    if [ -n "${EXCLUDE_PATHS+x}" ]; then
+        for path in "${EXCLUDE_PATHS[@]}"; do
+            FIND_OPTS+=("-path" "$path" "-prune" "-o")
+        done
+    fi
+    FILE_COUNT=$(find "$SCAN_PATH" "${FIND_OPTS[@]}" -type f -print | wc -l)
+    echo "📄 Found $FILE_COUNT files to scan." | tee -a "$LOG_FILE"
+
     mkdir -p "$QUARANTINE_DIR"
     
     # --- TARGET FOLDER IS SET HERE ---
     # Run clamdscan directly on the path. The daemon handles exclusions via config.
-    clamdscan --multiscan --fdpass "$SCAN_PATH" --infected --move="$QUARANTINE_DIR" 2>&1 | tee -a "$LOG_FILE"
+    clamdscan --multiscan --fdpass "$SCAN_PATH" --move="$QUARANTINE_DIR" 2>&1 | tee -a "$LOG_FILE"
     CLAM_EXIT=${PIPESTATUS[0]}
 
     echo -e "\nRunning Lynis audit..." >> "$LOG_FILE"

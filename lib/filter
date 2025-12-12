@@ -49,6 +49,11 @@ def extract_clamav_summary(content):
         files_match = re.search(r"Scanned files:\s*(\d+)", summary_text)
         if files_match:
             total_files = int(files_match.group(1))
+        else:
+            # Fallback: Look for the custom log line added by cavlite
+            custom_files_match = re.search(r"📄 Found (\d+) files to scan", content)
+            if custom_files_match:
+                total_files = int(custom_files_match.group(1))
 
         return {
             "hostname": hostname,
