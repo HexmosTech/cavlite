@@ -174,7 +174,7 @@ function start_scan() {
     
     # --- TARGET FOLDER IS SET HERE ---
     # Run clamdscan directly on the path. The daemon handles exclusions via config.
-    clamdscan --multiscan --fdpass / --move="$QUARANTINE_DIR" --stream --stdout 2>&1 | tee -a "$LOG_FILE"
+    clamdscan --multiscan --fdpass / --move="$QUARANTINE_DIR" --stdout 2>&1 | tee -a "$LOG_FILE"
     CLAM_EXIT=${PIPESTATUS[0]}
 
     echo -e "\nRunning Lynis audit..." >> "$LOG_FILE"
