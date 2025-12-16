@@ -17,14 +17,14 @@ SERVER_NAME=$(hostname -s)
 # Load configuration
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 
-# 1. Load local config (Development)
-if [ -f "$SCRIPT_DIR/config/cavlite.conf" ]; then
-    source "$SCRIPT_DIR/config/cavlite.conf"
-fi
-
-# 2. Load system config (Production - Overrides local)
+# 1. Load system config (Production)
 if [ -f "/etc/cavlite/cavlite.conf" ]; then
     source "/etc/cavlite/cavlite.conf"
+fi
+
+# 2. Load local config (Development - Overrides system)
+if [ -f "$SCRIPT_DIR/config/cavlite.conf" ]; then
+    source "$SCRIPT_DIR/config/cavlite.conf"
 fi
 
 # Set defaults if not provided in config
@@ -169,6 +169,16 @@ function start_scan() {
 
 
     echo "Running ClamAV scan on $SERVER_NAME..." >> "$LOG_FILE"
+    echo "🔍 Calculating files to scan..." | tee -a "$LOG_FILE"
+    if [ ${#EXCLUDE_PATHS[@]} -eq 0 ]; then
+        FILE_COUNT=$(find "$SCAN_PATH" -type f 2>/dev/null | wc -l)
+    else
+        # Join array with | for grep query
+        # We use a subshell to avoid changing global IFS
+        COMBINED_REGEX=$(IFS="|"; echo "${EXCLUDE_PATHS[*]}")
+        FILE_COUNT=$(find "$SCAN_PATH" -type f 2>/dev/null | grep -vE "$COMBINED_REGEX" | wc -l)
+    fi
+    echo "📄 Found $FILE_COUNT files to scan." | tee -a "$LOG_FILE"
     
     mkdir -p "$QUARANTINE_DIR"
     
