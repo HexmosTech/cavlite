@@ -27,6 +27,11 @@ if [ -f "$SCRIPT_DIR/config/cavlite.conf" ]; then
     source "$SCRIPT_DIR/config/cavlite.conf"
 fi
 
+# 3. Load test config (Test Runner - Overrides all)
+if [ -f "$SCRIPT_DIR/test/test.cavlite.conf" ]; then
+    source "$SCRIPT_DIR/test/test.cavlite.conf"
+fi
+
 # Set defaults if not provided in config
 : "${SCAN_PATH:=/}"
 : "${QUARANTINE_DIR:=/var/quarantine}"
