@@ -1,0 +1,65 @@
+#!/bin/bash
+set -e
+
+# Get absolute path of the script directory (test/)
+TEST_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+PROJECT_ROOT="$(dirname "$TEST_DIR")"
+# Use absolute path for config file
+CONFIG_FILE="$TEST_DIR/test.cavlite.conf"
+
+# Calculate paths
+TEST_SCAN_PATH="$TEST_DIR"
+TEST_QUARANTINE_PATH="$TEST_DIR/quarantine"
+
+echo "🔧 Configuring test environment..."
+# Update test config with absolute paths
+# Use | delimiter for sed to avoid issues with / in paths
+sed -i "s|SCAN_PATH=.*|SCAN_PATH=\"$TEST_SCAN_PATH\" # Path to scan|" "$CONFIG_FILE"
+sed -i "s|QUARANTINE_DIR=.*|QUARANTINE_DIR=\"$TEST_QUARANTINE_PATH\" # Path to move infected files|" "$CONFIG_FILE"
+
+echo "🚀 Starting Cavlite Scan (sudo required)..."
+cd "$PROJECT_ROOT"
+sudo ./cavlite --start
+
+echo "✅ Scan completed. Verifying results..."
+
+EXPECTED_INFECTED="$TEST_QUARANTINE_PATH/eicar.com"
+ORIGINAL_VIRUS_DIR="$TEST_DIR/virus"
+
+if [ -f "$EXPECTED_INFECTED" ]; then
+    echo "🦠 Virus detection verified: eicar.com found in quarantine."
+    
+    echo "🧹 Cleaning up and resetting..."
+    # Move ALL quarantined files back to virus dir
+    # we use -n check to ensure directory is not empty before moving to avoid error
+    if [ "$(ls -A "$TEST_QUARANTINE_PATH")" ]; then
+        mv "$TEST_QUARANTINE_PATH"/* "$ORIGINAL_VIRUS_DIR/" 2>/dev/null || true
+    fi
+
+    echo "🔍 Verifying reset state..."
+    FAILED=0
+    
+    if [ -f "$ORIGINAL_VIRUS_DIR/eicar.com" ]; then
+        echo "✅ eicar.com restored."
+    else
+        echo "❌ Error: eicar.com missing from $ORIGINAL_VIRUS_DIR"
+        FAILED=1
+    fi
+    
+    if [ -f "$ORIGINAL_VIRUS_DIR/ignored_swapfile_virus.com" ]; then
+        echo "✅ ignored_swapfile_virus.com restored."
+    else
+        echo "❌ Error: ignored_swapfile_virus.com missing from $ORIGINAL_VIRUS_DIR"
+        FAILED=1
+    fi
+
+    if [ $FAILED -eq 0 ]; then
+        echo "🎉 Result Passed"
+    else
+        echo "❌ Error: Reset verification failed."
+        exit 1
+    fi
+else
+    echo "❌ Error: Verification Failed! eicar.com NOT found in quarantine."
+    exit 1
+fi

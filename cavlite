@@ -17,14 +17,19 @@ SERVER_NAME=$(hostname -s)
 # Load configuration
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 
-# 1. Load local config (Development)
+# 1. Load system config (Production)
+if [ -f "/etc/cavlite/cavlite.conf" ]; then
+    source "/etc/cavlite/cavlite.conf"
+fi
+
+# 2. Load local config (Development - Overrides system)
 if [ -f "$SCRIPT_DIR/config/cavlite.conf" ]; then
     source "$SCRIPT_DIR/config/cavlite.conf"
 fi
 
-# 2. Load system config (Production - Overrides local)
-if [ -f "/etc/cavlite/cavlite.conf" ]; then
-    source "/etc/cavlite/cavlite.conf"
+# 3. Load test config (Test Runner - Overrides all)
+if [ -f "$SCRIPT_DIR/test/test.cavlite.conf" ]; then
+    source "$SCRIPT_DIR/test/test.cavlite.conf"
 fi
 
 # Set defaults if not provided in config
@@ -33,9 +38,11 @@ fi
 
 
 # Paths
-LOG_DIR="/var/log"
-LOG_FILE="$LOG_DIR/security_audit.log"
-PID_FILE="/var/run/security_audit.pid"
+: "${LOG_FILE:=/var/log/cavlite}"
+LOG_DIR="$LOG_FILE"
+LOG_FILE="$LOG_DIR/$(date +%A | tr '[:upper:]' '[:lower:]').log"
+PID_FILE="/var/run/cavlite.pid"
+STATE_FILE="/var/run/cavlite.logpath"
 CLEANER_SCRIPT="/usr/local/lib/cavlite/filter"
 CLAMD_CONF="/etc/clamav/clamd.conf"
 # --- CONFIGURATION END ---
@@ -48,9 +55,10 @@ function cleanup_clamd_config() {
             # Remove the block from Start to End
             sed -i '/### CAVlite Start/,/### CAVlite END/d' "$CLAMD_CONF"
             
-            # Restart daemon to apply cleanup
-            systemctl stop clamav-daemon.socket 2>/dev/null
-            systemctl restart clamav-daemon
+            # Restart daemon to apply cleanup - REMOVED to prevent double restarts/hangs
+            # The daemon is either restarted in update_clamd_config or stopped at end of scan.
+            # systemctl stop clamav-daemon.socket 2>/dev/null
+            # systemctl restart clamav-daemon
         fi
     fi
 }
@@ -141,11 +149,11 @@ function start_scan() {
 
     # Create log directory
     mkdir -p "$LOG_DIR"
-    # Rotate previous log
-    [ -f "$LOG_FILE" ] && mv "$LOG_FILE" "${LOG_FILE}.old"
+    # Log rotation is handled by day-based filenames (overwrites previous week)
 
     echo $$ >"$PID_FILE"
-    trap 'cleanup_clamd_config; rm -f "$PID_FILE"; systemctl stop clamav-daemon &>/dev/null' EXIT
+    echo "$LOG_FILE" > "$STATE_FILE"
+    trap 'cleanup_clamd_config; rm -f "$PID_FILE" "$STATE_FILE"; systemctl stop clamav-daemon &>/dev/null' EXIT
 
     # Start logging
     TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
@@ -155,31 +163,51 @@ function start_scan() {
         echo "🚫 Excluded Paths (Configured in $CLAMD_CONF): ${EXCLUDE_PATHS[*]}" | tee -a "$LOG_FILE"
     fi
 
-    # Inject configuration
-    update_clamd_config
+    # Initialize exit codes
+    CLAM_EXIT=0
+    LYNIS_EXIT=0
 
-    # Ensure daemon is running (important if no exclusions were set/updated)
-    if ! systemctl is-active --quiet clamav-daemon; then
-         echo "🚀 Starting clamav-daemon..." | tee -a "$LOG_FILE"
-         systemctl start clamav-daemon
+    # --- CLAMAV SCAN ---
+    if [[ "${clamdscan}" == "True" ]]; then
+        # Inject configuration
+        update_clamd_config
+
+        # Ensure daemon is running
+        if ! systemctl is-active --quiet clamav-daemon; then
+             echo "🚀 Starting clamav-daemon..." | tee -a "$LOG_FILE"
+             systemctl start clamav-daemon
+        fi
+
+        # Wait for socket
+        wait_for_clamd
+
+        echo "Running ClamAV scan on $SERVER_NAME..." >> "$LOG_FILE"
+        echo "🔍 Calculating files to scan..." | tee -a "$LOG_FILE"
+        if [ ${#EXCLUDE_PATHS[@]} -eq 0 ]; then
+            FILE_COUNT=$(find "$SCAN_PATH" -type f 2>/dev/null | wc -l)
+        else
+            COMBINED_REGEX=$(IFS="|"; echo "${EXCLUDE_PATHS[*]}")
+            FILE_COUNT=$(find "$SCAN_PATH" -type f 2>/dev/null | grep -vE "$COMBINED_REGEX" | wc -l)
+        fi
+        echo "📄 Found $FILE_COUNT files to scan." | tee -a "$LOG_FILE"
+        
+        mkdir -p "$QUARANTINE_DIR"
+        
+        # Run clamdscan
+        clamdscan --multiscan --fdpass "$SCAN_PATH" --move="$QUARANTINE_DIR" --stdout 2>&1 | tee -a "$LOG_FILE"
+        CLAM_EXIT=${PIPESTATUS[0]}
+    else
+        echo "ℹ️  ClamAV scan skipped (Disabled in config)" | tee -a "$LOG_FILE"
     fi
 
-    # Wait for socket
-    wait_for_clamd
-
-
-    echo "Running ClamAV scan on $SERVER_NAME..." >> "$LOG_FILE"
-    
-    mkdir -p "$QUARANTINE_DIR"
-    
-    # --- TARGET FOLDER IS SET HERE ---
-    # Run clamdscan directly on the path. The daemon handles exclusions via config.
-    clamdscan --multiscan --fdpass / --move="$QUARANTINE_DIR" --stdout 2>&1 | tee -a "$LOG_FILE"
-    CLAM_EXIT=${PIPESTATUS[0]}
-
-    echo -e "\nRunning Lynis audit..." >> "$LOG_FILE"
-    lynis audit system >> "$LOG_FILE"
-    LYNIS_EXIT=${PIPESTATUS[0]}
+    # --- LYNIS AUDIT ---
+    if [[ "${LYNIS}" == "True" ]]; then
+        echo -e "\nRunning Lynis audit..." >> "$LOG_FILE"
+        lynis audit system >> "$LOG_FILE"
+        LYNIS_EXIT=${PIPESTATUS[0]}
+    else
+        echo -e "\nℹ️  Lynis audit skipped (Disabled in config)" >> "$LOG_FILE"
+    fi
 
     echo -e "\nCleaning up log file..." >> "$LOG_FILE"
     CLEANED_LOG_FILE=$(python3 "$CLEANER_SCRIPT" "$LOG_FILE")
@@ -210,6 +238,11 @@ function start_scan() {
 }
 
 function stop_scan() {
+    # Attempt to load the correctly dated log file from the running process state
+    if [ -f "$STATE_FILE" ]; then
+        LOG_FILE=$(cat "$STATE_FILE")
+    fi
+
     # Ensure config is cleaned up even on stop
     cleanup_clamd_config
 
@@ -240,7 +273,7 @@ function stop_scan() {
         pkill -9 lynis 2>/dev/null
         if [ -f "$PID_FILE" ]; then
             kill "$(cat "$PID_FILE")" 2>/dev/null
-            rm -f "$PID_FILE"
+            rm -f "$PID_FILE" "$STATE_FILE"
         fi
         exit 0
     fi
@@ -285,7 +318,7 @@ function stop_scan() {
             echo "Terminating script manager (PID: $SCAN_PID)..."
             kill "$SCAN_PID"
         fi
-        rm -f "$PID_FILE"
+        rm -f "$PID_FILE" "$STATE_FILE"
     fi
     
     # 5. Send Interrupted Notification

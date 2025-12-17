@@ -88,9 +88,26 @@ QUARANTINE_DIR="/var/quarantine"
 # Paths to exclude from scanning (Space separated elements)
 EXCLUDE_PATHS=("/proc")
 
+# Log Configuration
+# Logs are moved to day-based files (e.g., monday.log) in this directory
+LOG_FILE="/var/log/cavlite"
+
+# Enable/Disable Scanners
+LYNIS=True
+clamdscan=True
 ```
 
+### Log Rotation
+
+`CAVLite` automatically manages log files based on the day of the week.
+
+* Logs are stored in the directory specified by `LOG_FILE` (default: `/var/log/cavlite`).
+* Files are named `monday.log`, `tuesday.log`, etc.
+* Logs are overwritten weekly (e.g., next Monday's scan overwrites the previous Monday's log).
+
 ## Credits
+
+Hexmos
 
 ## License
 
