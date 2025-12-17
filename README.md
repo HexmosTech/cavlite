@@ -94,7 +94,7 @@ LOG_FILE="/var/log/cavlite"
 
 # Enable/Disable Scanners
 LYNIS=True
-clamdscan=True
+CLAMDSCAN=True
 ```
 
 ### Log Rotation

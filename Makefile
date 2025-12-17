@@ -50,3 +50,6 @@ bump:
 	else \
 		echo "Changes staged in cavlite file but NOT committed. process aborted."; \
 	fi
+
+version:
+	@echo $(VERSION)

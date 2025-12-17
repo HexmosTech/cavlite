@@ -2,11 +2,6 @@
 
 VERSION="0.1.1"
 
-# Enforce Sudo
-if [ "$EUID" -ne 0 ]; then
-    echo "❌ Error: This script must be run as root."
-    exit 1
-fi
 
 # Setup
 # --- CONFIGURATION START ---
@@ -46,6 +41,17 @@ STATE_FILE="/var/run/cavlite.logpath"
 CLEANER_SCRIPT="/usr/local/lib/cavlite/filter"
 CLAMD_CONF="/etc/clamav/clamd.conf"
 # --- CONFIGURATION END ---
+
+function check_root() {
+    if [ "$EUID" -ne 0 ]; then
+        echo "❌ Error: This operation requires root privileges. Please run as root."
+        exit 1
+    fi
+}
+
+function show_version() {
+    echo "cavlite version $VERSION"
+}
 
 function cleanup_clamd_config() {
     if [ -f "$CLAMD_CONF" ]; then
@@ -130,6 +136,7 @@ EOF
 }
 
 function check_discord() {
+    check_root
     echo "🔍 Checking Discord Webhook configuration..."
     if [ -z "$WEBHOOK_URL" ]; then
         echo "❌ Error: WEBHOOK_URL is not configured in /etc/cavlite/cavlite.conf"
@@ -142,6 +149,7 @@ function check_discord() {
 }
 
 function start_scan() {
+    check_root
     if [ -f "$PID_FILE" ]; then
         echo "Scan is already in progress (PID: $(cat $PID_FILE)). Exiting."
         exit 1
@@ -168,7 +176,7 @@ function start_scan() {
     LYNIS_EXIT=0
 
     # --- CLAMAV SCAN ---
-    if [[ "${clamdscan}" == "True" ]]; then
+    if [[ "${CLAMDSCAN}" == "True" ]]; then
         # Inject configuration
         update_clamd_config
 
@@ -238,6 +246,7 @@ function start_scan() {
 }
 
 function stop_scan() {
+    check_root
     # Attempt to load the correctly dated log file from the running process state
     if [ -f "$STATE_FILE" ]; then
         LOG_FILE=$(cat "$STATE_FILE")
@@ -352,10 +361,11 @@ function stop_scan() {
 }
 
 function show_help() {
-    echo "Usage: $0 {--start|--stop|--check-discord|--help|-h}"
+    echo "Usage: $0 {--start|--stop|--check-discord|--version|--help|-h}"
     echo "  --start          Start the security scan (ClamAV and Lynis)."
     echo "  --stop           Stop any running security scan."
     echo "  --check-discord  Test Discord webhook configuration."
+    echo "  --version, --v   Show version information."
     echo "  --help, -h       Display this help message."
 }
 
@@ -368,6 +378,9 @@ case "$1" in
     ;;
 --check-discord)
     check_discord
+    ;;
+--version|--v)
+    show_version
     ;;
 --help|-h)
     show_help
